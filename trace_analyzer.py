@@ -163,6 +163,19 @@ def print_cache_analysis(result: dict) -> None:
     print(f"Total miss blocks:     {total_miss:,}")
     print(f"  Cold miss:           {cold_miss:,} ({cold_pct:.2f}%)")
     print(f"  Capacity miss:       {cap_miss:,} ({cap_pct:.2f}%)")
+    if result.get('reaccess_count'):
+        print(f"\nEvicted → reaccessed:  {result['reaccess_count']:,} "
+              f"({result['reaccess_frac']:.1f}% of capacity misses)")
+        ts_unit = "s" if result['gap_ts_max'] < 100 else ""
+        print(f"Gap (requests):        "
+              f"min={result['gap_req_min']:,}, "
+              f"p50={result['gap_req_p50']:,}, "
+              f"p99={result['gap_req_p99']:,}, "
+              f"max={result['gap_req_max']:,}")
+        print(f"Gap (timestamp):       "
+              f"min={result['gap_ts_min']}{ts_unit}, "
+              f"p50={result['gap_ts_p50']}{ts_unit}, "
+              f"max={result['gap_ts_max']}{ts_unit}")
 
 
 def main(args):

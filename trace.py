@@ -80,8 +80,10 @@ class Trace:
         sim = CacheSimulator(capacity_blocks, policy)
 
         results = []
-        for req in self.requests:
-            hit, miss, cold_miss, capacity_miss, evictions = sim.access_blocks(req.hash_ids)
+        for idx, req in enumerate(self.requests):
+            hit, miss, cold_miss, capacity_miss, evictions = sim.access_blocks(
+                req.hash_ids, req_idx=idx, timestamp=req.timestamp
+            )
             computed = hit * HASH_BLOCK_SIZE
             computed = min(computed, req.input_length)
             results.append({
@@ -101,6 +103,25 @@ class Trace:
         total_capacity_miss = sum(r["capacity_miss"] for r in results)
         total_blocks = total_hit + total_miss
         self.cache_results = results
+        gaps = [g[1] for g in sim.reaccess_gaps]
+        gap_ts = [g[2] for g in sim.reaccess_gaps]
+
+        gap_stats = {}
+        if gaps:
+            gaps_sorted = sorted(gaps)
+            ts_sorted = sorted(gap_ts)
+            gap_stats = {
+                "reaccess_count": len(gaps),
+                "reaccess_frac": len(gaps) / total_capacity_miss * 100 if total_capacity_miss > 0 else 0,
+                "gap_req_min": min(gaps),
+                "gap_req_p50": gaps_sorted[len(gaps_sorted) // 2],
+                "gap_req_p99": gaps_sorted[int(len(gaps_sorted) * 0.99)] if len(gaps_sorted) > 1 else gaps_sorted[0],
+                "gap_req_max": max(gaps),
+                "gap_ts_min": min(gap_ts),
+                "gap_ts_p50": ts_sorted[len(ts_sorted) // 2],
+                "gap_ts_max": max(gap_ts),
+            }
+
         self.cache_stats = {
             "capacity_blocks": capacity_blocks,
             "capacity_bytes": capacity_blocks * block_bytes,
@@ -112,6 +133,7 @@ class Trace:
             "total_blocks": total_blocks,
             "hit_rate": total_hit / total_blocks if total_blocks > 0 else 0.0,
             "total_evictions": sim.total_evictions,
+            **gap_stats,
         }
         return self.cache_stats
 
