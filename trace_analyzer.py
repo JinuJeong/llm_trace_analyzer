@@ -121,6 +121,17 @@ def _fmt_bytes(n: float) -> str:
     return f"{n:.0f} B"
 
 
+def _fmt_time(ms: float) -> str:
+    s = ms / 1000
+    if s < 60:
+        return f"{s:.1f}s"
+    m = s / 60
+    if m < 60:
+        return f"{m:.1f}m"
+    h = m / 60
+    return f"{h:.1f}h"
+
+
 def print_model_info(info: dict) -> None:
     print(f"Model: {info['model_name']} ({info['num_full_attn_layers']}/{info['num_hidden_layers']} full-attn layers, "
           f"{info['num_kv_heads']} KV heads, {info['head_dim']} head dim, "
@@ -144,7 +155,7 @@ def print_analysis(result: dict) -> None:
         print(f"Total KV set:          {_fmt_bytes(result['unique_kv'])}")
 
 
-def print_cache_analysis(result: dict) -> None:
+def print_cache_analysis(result: dict, show_hist: bool = False) -> None:
     print()
     print("=" * 50)
     print("GPU KV Cache Simulation")
@@ -164,18 +175,75 @@ def print_cache_analysis(result: dict) -> None:
     print(f"  Cold miss:           {cold_miss:,} ({cold_pct:.2f}%)")
     print(f"  Capacity miss:       {cap_miss:,} ({cap_pct:.2f}%)")
     if result.get('reaccess_count'):
-        print(f"\nEvicted → reaccessed:  {result['reaccess_count']:,} "
-              f"({result['reaccess_frac']:.1f}% of capacity misses)")
-        ts_unit = "s" if result['gap_ts_max'] < 100 else ""
-        print(f"Gap (requests):        "
+        print(f"Reaccess interval (reqs): "
               f"min={result['gap_req_min']:,}, "
               f"p50={result['gap_req_p50']:,}, "
               f"p99={result['gap_req_p99']:,}, "
               f"max={result['gap_req_max']:,}")
-        print(f"Gap (timestamp):       "
-              f"min={result['gap_ts_min']}{ts_unit}, "
-              f"p50={result['gap_ts_p50']}{ts_unit}, "
-              f"max={result['gap_ts_max']}{ts_unit}")
+        print(f"Reaccess interval (time): "
+              f"min={_fmt_time(result['gap_ts_min'])}, "
+              f"p50={_fmt_time(result['gap_ts_p50'])}, "
+              f"max={_fmt_time(result['gap_ts_max'])}")
+        if show_hist:
+            _print_histogram(
+                [g[1] for g in result.get('_raw_gaps', [])],
+                [g[2] for g in result.get('_raw_gaps', [])],
+            )
+
+
+def _print_histogram(gaps, gaps_ts):
+    if not gaps:
+        return
+
+    print("\nReaccess interval histogram:")
+    print("-" * 65)
+
+    # Request gap histogram
+    bins_req = [0, 1, 10, 100, 500, 1000, 5000, 10000, 20000]
+    labels_req = ["<1    ", "1-10  ", "10-100", "100-500", "500-1K",
+                  "1K-5K ", "5K-10K", "10K-20K", ">20K  "]
+    counts_req = [0] * len(labels_req)
+    for g in gaps:
+        for i in range(len(bins_req) - 1):
+            if bins_req[i] <= g < bins_req[i+1]:
+                counts_req[i] += 1
+                break
+        else:
+            counts_req[-1] += 1
+
+    max_count = max(counts_req) if counts_req else 0
+    width = 40
+    for label, count in zip(labels_req, counts_req):
+        bar_len = int(count / max_count * width) if max_count > 0 else 0
+        bar = "█" * bar_len
+        pct = count / len(gaps) * 100 if gaps else 0
+        print(f"  {label} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
+    print("-" * 65)
+
+    # Time gap histogram
+    ts_gaps = [t / 1000 for t in gaps_ts]
+    bins_ts = [0, 1, 5, 10, 30, 60, 120, 300, 600, 1200, 3600]
+    labels_ts = ["<1s   ", "1-5s  ", "5-10s ", "10-30s", "30-60s",
+                 "1-2m  ", "2-5m  ", "5-10m ", "10-30m", "30-60m", ">1h   "]
+    counts_ts = [0] * len(labels_ts)
+    for g in ts_gaps:
+        for i in range(len(bins_ts) - 1):
+            if bins_ts[i] <= g < bins_ts[i+1]:
+                counts_ts[i] += 1
+                break
+        else:
+            counts_ts[-1] += 1
+
+    max_count_ts = max(counts_ts) if counts_ts else 0
+    print("\nReaccess time histogram:")
+    print("-" * 65)
+    for label, count in zip(labels_ts, counts_ts):
+        bar_len = int(count / max_count_ts * width) if max_count_ts > 0 else 0
+        bar = "█" * bar_len
+        pct = count / len(ts_gaps) * 100 if ts_gaps else 0
+        print(f"  {label} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
+    print("-" * 65)
+
 
 
 def main(args):
@@ -206,7 +274,7 @@ def main(args):
             kv_per_token=kv_per_token,
             policy=args.cache_policy,
         )
-        print_cache_analysis(cache_result)
+        print_cache_analysis(cache_result, show_hist=args.show_hist)
 
 
 if __name__ == "__main__":
@@ -246,6 +314,11 @@ if __name__ == "__main__":
         default="lru",
         choices=["lru", "fifo"],
         help="Eviction policy for limited cache simulation (default: lru)",
+    )
+    parser.add_argument(
+        "--show-hist",
+        action="store_true",
+        help="Show reaccess interval histogram",
     )
     args = parser.parse_args()
     main(args)

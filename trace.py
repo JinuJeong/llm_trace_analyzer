@@ -120,6 +120,7 @@ class Trace:
                 "gap_ts_min": min(gap_ts),
                 "gap_ts_p50": ts_sorted[len(ts_sorted) // 2],
                 "gap_ts_max": max(gap_ts),
+                "_raw_gaps": sim.reaccess_gaps,
             }
 
         self.cache_stats = {
