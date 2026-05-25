@@ -175,23 +175,31 @@ def print_cache_analysis(result: dict, show_hist: bool = False) -> None:
     print(f"  Cold miss:           {cold_miss:,} ({cold_pct:.2f}%)")
     print(f"  Capacity miss:       {cap_miss:,} ({cap_pct:.2f}%)")
     if result.get('reaccess_count'):
-        print(f"Reaccess interval (reqs): "
+        print(f"{'Reaccess interval (reqs):':<25} "
               f"min={result['gap_req_min']:,}, "
               f"p50={result['gap_req_p50']:,}, "
               f"p99={result['gap_req_p99']:,}, "
               f"max={result['gap_req_max']:,}")
-        print(f"Reaccess interval (time): "
+        print(f"{'Reaccess interval (time):':<25} "
               f"min={_fmt_time(result['gap_ts_min'])}, "
               f"p50={_fmt_time(result['gap_ts_p50'])}, "
               f"max={_fmt_time(result['gap_ts_max'])}")
+        bb = result['block_bytes']
+        print(f"{'Reaccess gap (blocks):':<25} "
+              f"min={result['gap_filled_min']:,} ({_fmt_bytes(result['gap_filled_min'] * bb)}), "
+              f"p50={result['gap_filled_p50']:,} ({_fmt_bytes(result['gap_filled_p50'] * bb)}), "
+              f"p99={result['gap_filled_p99']:,} ({_fmt_bytes(result['gap_filled_p99'] * bb)}), "
+              f"max={result['gap_filled_max']:,} ({_fmt_bytes(result['gap_filled_max'] * bb)})")
         if show_hist:
             _print_histogram(
                 [g[1] for g in result.get('_raw_gaps', [])],
                 [g[2] for g in result.get('_raw_gaps', [])],
+                [g[3] for g in result.get('_raw_gaps', [])],
+                block_bytes=bb,
             )
 
 
-def _print_histogram(gaps, gaps_ts):
+def _print_histogram(gaps, gaps_ts, gaps_filled=None, block_bytes=0):
     if not gaps:
         return
 
@@ -200,8 +208,8 @@ def _print_histogram(gaps, gaps_ts):
 
     # Request gap histogram
     bins_req = [0, 1, 10, 100, 500, 1000, 5000, 10000, 20000]
-    labels_req = ["<1    ", "1-10  ", "10-100", "100-500", "500-1K",
-                  "1K-5K ", "5K-10K", "10K-20K", ">20K  "]
+    labels_req = ["<1", "1-10", "10-100", "100-500", "500-1K",
+                  "1K-5K", "5K-10K", "10K-20K", ">20K"]
     counts_req = [0] * len(labels_req)
     for g in gaps:
         for i in range(len(bins_req) - 1):
@@ -211,20 +219,24 @@ def _print_histogram(gaps, gaps_ts):
         else:
             counts_req[-1] += 1
 
-    max_count = max(counts_req) if counts_req else 0
+    lw = max(len(l) for l in labels_req)
     width = 40
+    max_count = max(counts_req) if counts_req else 0
+    dash = "-" * (2 + lw + 1 + width + 1 + 18)
+    print("\nReaccess interval histogram:")
+    print(dash)
     for label, count in zip(labels_req, counts_req):
         bar_len = int(count / max_count * width) if max_count > 0 else 0
         bar = "█" * bar_len
         pct = count / len(gaps) * 100 if gaps else 0
-        print(f"  {label} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
-    print("-" * 65)
+        print(f"  {label:<{lw}} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
+    print(dash)
 
     # Time gap histogram
     ts_gaps = [t / 1000 for t in gaps_ts]
     bins_ts = [0, 1, 5, 10, 30, 60, 120, 300, 600, 1200, 3600]
-    labels_ts = ["<1s   ", "1-5s  ", "5-10s ", "10-30s", "30-60s",
-                 "1-2m  ", "2-5m  ", "5-10m ", "10-30m", "30-60m", ">1h   "]
+    labels_ts = ["<1s", "1-5s", "5-10s", "10-30s", "30-60s",
+                 "1-2m", "2-5m", "5-10m", "10-30m", "30-60m", ">1h"]
     counts_ts = [0] * len(labels_ts)
     for g in ts_gaps:
         for i in range(len(bins_ts) - 1):
@@ -234,15 +246,57 @@ def _print_histogram(gaps, gaps_ts):
         else:
             counts_ts[-1] += 1
 
+    lw = max(len(l) for l in labels_ts)
     max_count_ts = max(counts_ts) if counts_ts else 0
+    dash = "-" * (2 + lw + 1 + width + 1 + 18)
     print("\nReaccess time histogram:")
-    print("-" * 65)
+    print(dash)
     for label, count in zip(labels_ts, counts_ts):
         bar_len = int(count / max_count_ts * width) if max_count_ts > 0 else 0
         bar = "█" * bar_len
         pct = count / len(ts_gaps) * 100 if ts_gaps else 0
-        print(f"  {label} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
-    print("-" * 65)
+        print(f"  {label:<{lw}} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
+    print(dash)
+
+    # Filled blocks since eviction histogram
+    if gaps_filled:
+        bins_filled = [0, 1000, 5000, 10000, 50000, 100000, 200000, 500000]
+        if block_bytes > 0:
+            def _size_label(lo, hi=None):
+                lo_str = _fmt_bytes(lo * block_bytes)
+                if hi:
+                    hi_str = _fmt_bytes(hi * block_bytes)
+                    return f"{lo//1000}K-{hi//1000}K ({lo_str}-{hi_str})"
+                else:
+                    return f">{lo//1000}K ({lo_str}+)"
+            labels_filled = []
+            for i in range(len(bins_filled) - 1):
+                lo, hi = bins_filled[i], bins_filled[i+1]
+                labels_filled.append(_size_label(lo, hi))
+            labels_filled.append(_size_label(bins_filled[-1]))
+        else:
+            labels_filled = ["<1K", "1K-5K", "5K-10K", "10K-50K", "50K-100K",
+                             "100K-200K", "200K-500K", ">500K"]
+        counts_filled = [0] * len(labels_filled)
+        for g in gaps_filled:
+            for i in range(len(bins_filled) - 1):
+                if bins_filled[i] <= g < bins_filled[i+1]:
+                    counts_filled[i] += 1
+                    break
+            else:
+                counts_filled[-1] += 1
+
+        max_count_filled = max(counts_filled) if counts_filled else 0
+        lw = max(len(l) for l in labels_filled)
+        dash = "-" * (2 + lw + 1 + width + 1 + 18)
+        print("\nReaccess gap histogram (blocks):")
+        print(dash)
+        for label, count in zip(labels_filled, counts_filled):
+            bar_len = int(count / max_count_filled * width) if max_count_filled > 0 else 0
+            bar = "█" * bar_len
+            pct = count / len(gaps_filled) * 100 if gaps_filled else 0
+            print(f"  {label:<{lw}} |{bar:<{width}}| {count:>6,} ({pct:>5.1f}%)")
+        print(dash)
 
 
 

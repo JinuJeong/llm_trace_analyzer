@@ -105,11 +105,13 @@ class Trace:
         self.cache_results = results
         gaps = [g[1] for g in sim.reaccess_gaps]
         gap_ts = [g[2] for g in sim.reaccess_gaps]
+        gap_filled = [g[3] for g in sim.reaccess_gaps]
 
         gap_stats = {}
         if gaps:
             gaps_sorted = sorted(gaps)
             ts_sorted = sorted(gap_ts)
+            filled_sorted = sorted(gap_filled)
             gap_stats = {
                 "reaccess_count": len(gaps),
                 "reaccess_frac": len(gaps) / total_capacity_miss * 100 if total_capacity_miss > 0 else 0,
@@ -120,12 +122,17 @@ class Trace:
                 "gap_ts_min": min(gap_ts),
                 "gap_ts_p50": ts_sorted[len(ts_sorted) // 2],
                 "gap_ts_max": max(gap_ts),
+                "gap_filled_min": min(gap_filled),
+                "gap_filled_p50": filled_sorted[len(filled_sorted) // 2],
+                "gap_filled_p99": filled_sorted[int(len(filled_sorted) * 0.99)] if len(filled_sorted) > 1 else filled_sorted[0],
+                "gap_filled_max": max(gap_filled),
                 "_raw_gaps": sim.reaccess_gaps,
             }
 
         self.cache_stats = {
             "capacity_blocks": capacity_blocks,
             "capacity_bytes": capacity_blocks * block_bytes,
+            "block_bytes": block_bytes,
             "policy": policy,
             "total_hit_blocks": total_hit,
             "total_miss_blocks": total_miss,
