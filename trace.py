@@ -7,7 +7,9 @@ from typing import NamedTuple
 from pathlib import Path
 from typing import List, Optional
 
-CACHE_DIR = Path(os.path.expanduser("~/.cache/gds-llm-analysis/traces"))
+from cache_simulator import CacheSimulator
+
+CACHE_DIR = Path(os.path.expanduser("~/.cache/llm-trace-analyzer/traces"))
 
 
 class TraceType(enum.Enum):
@@ -60,6 +62,58 @@ class Trace:
     def __init__(self, requests: List[TraceRequest]):
         self.requests = sorted(requests, key=lambda r: r.timestamp)
         self._simulate_prefix_cache()
+
+    def simulate_cache(
+        self,
+        gpu_memory_bytes: int,
+        kv_bytes_per_token: int,
+        policy: str = "lru",
+    ) -> dict:
+        """
+        Simulate prefix caching under a bounded GPU memory budget.
+
+        Returns a dict with overall statistics. Per-request results are stored
+        in ``self.limited_cache_results``.
+        """
+        block_bytes = HASH_BLOCK_SIZE * kv_bytes_per_token
+        capacity_blocks = gpu_memory_bytes // block_bytes
+        sim = CacheSimulator(capacity_blocks, policy)
+
+        results = []
+        for req in self.requests:
+            hit, miss, cold_miss, capacity_miss, evictions = sim.access_blocks(req.hash_ids)
+            computed = hit * HASH_BLOCK_SIZE
+            computed = min(computed, req.input_length)
+            results.append({
+                "timestamp": req.timestamp,
+                "input_length": req.input_length,
+                "hit_blocks": hit,
+                "miss_blocks": miss,
+                "cold_miss": cold_miss,
+                "capacity_miss": capacity_miss,
+                "computed_tokens": computed,
+                "evictions": evictions,
+            })
+
+        total_hit = sum(r["hit_blocks"] for r in results)
+        total_miss = sum(r["miss_blocks"] for r in results)
+        total_cold_miss = sum(r["cold_miss"] for r in results)
+        total_capacity_miss = sum(r["capacity_miss"] for r in results)
+        total_blocks = total_hit + total_miss
+        self.cache_results = results
+        self.cache_stats = {
+            "capacity_blocks": capacity_blocks,
+            "capacity_bytes": capacity_blocks * block_bytes,
+            "policy": policy,
+            "total_hit_blocks": total_hit,
+            "total_miss_blocks": total_miss,
+            "total_cold_miss": total_cold_miss,
+            "total_capacity_miss": total_capacity_miss,
+            "total_blocks": total_blocks,
+            "hit_rate": total_hit / total_blocks if total_blocks > 0 else 0.0,
+            "total_evictions": sim.total_evictions,
+        }
+        return self.cache_stats
 
     def _simulate_prefix_cache(self):
         cached: set = set()
