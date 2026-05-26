@@ -1,3 +1,4 @@
+import csv
 import math
 import statistics
 import argparse
@@ -203,9 +204,6 @@ def _print_histogram(gaps, gaps_ts, gaps_filled=None, block_bytes=0):
     if not gaps:
         return
 
-    print("\nReaccess interval histogram:")
-    print("-" * 65)
-
     # Request gap histogram
     bins_req = [0, 1, 10, 100, 500, 1000, 5000, 10000, 20000]
     labels_req = ["<1", "1-10", "10-100", "100-500", "500-1K",
@@ -300,6 +298,18 @@ def _print_histogram(gaps, gaps_ts, gaps_filled=None, block_bytes=0):
 
 
 
+def _write_reaccess_csv(result, path):
+    raw = result.get("_raw_gaps", [])
+    if not raw:
+        return
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["hid", "gap_requests", "gap_time_ms", "gap_blocks"])
+        for hid, gap_reqs, gap_ts, gap_filled in raw:
+            writer.writerow([hid, gap_reqs, gap_ts, gap_filled])
+    print(f"Reaccess gaps written to {path}")
+
+
 def main(args):
     trace = get_trace(
         trace_name=args.trace,
@@ -329,6 +339,8 @@ def main(args):
             policy=args.cache_policy,
         )
         print_cache_analysis(cache_result, show_hist=args.show_hist)
+        if args.reaccess_csv:
+            _write_reaccess_csv(cache_result, args.reaccess_csv)
 
 
 if __name__ == "__main__":
@@ -373,6 +385,11 @@ if __name__ == "__main__":
         "--show-hist",
         action="store_true",
         help="Show reaccess interval histogram",
+    )
+    parser.add_argument(
+        "--reaccess-csv",
+        default=None,
+        help="Output reaccess gap data as CSV for graphing",
     )
     args = parser.parse_args()
     main(args)
