@@ -11,8 +11,8 @@ class CacheSimulator:
         self.order = collections.OrderedDict()
         self.total_evictions = 0
         self.seen = set()
-        self.cumulative_misses = 0  # 누적 채워진 KV block 수
-        self.last_evicted = {}  # hid -> (req_idx, timestamp, cum_filled)
+        self.cumulative_misses = 0
+        self.last_accessed = {}  # hid -> (req_idx, timestamp, cum_filled)
         self.reaccess_gaps = []  # list of (hid, gap_reqs, gap_ts, gap_filled)
 
     def _evict_one(self, req_idx, timestamp):
@@ -21,7 +21,6 @@ class CacheSimulator:
         oldest_hid, _ = self.order.popitem(last=False)
         self.cache.pop(oldest_hid, None)
         self.total_evictions += 1
-        self.last_evicted[oldest_hid] = (req_idx, timestamp, self.cumulative_misses)
 
     def _insert(self, hid, req_idx, timestamp):
         if hid in self.cache:
@@ -52,6 +51,7 @@ class CacheSimulator:
                 hit += 1
                 if self.policy == "lru":
                     self.order.move_to_end(hid)
+                self.last_accessed[hid] = (req_idx, timestamp, self.cumulative_misses)
             else:
                 prefix_break = True
                 miss += 1
@@ -60,16 +60,17 @@ class CacheSimulator:
                     self.seen.add(hid)
                 else:
                     capacity_miss += 1
-                    if hid in self.last_evicted:
-                        ev_idx, ev_ts, ev_cum = self.last_evicted[hid]
+                    if hid in self.last_accessed:
+                        acc_idx, acc_ts, acc_cum = self.last_accessed[hid]
                         self.reaccess_gaps.append((
                             hid,
-                            req_idx - ev_idx,
-                            timestamp - ev_ts,
-                            self.cumulative_misses - ev_cum,
+                            req_idx - acc_idx,
+                            timestamp - acc_ts,
+                            self.cumulative_misses - acc_cum,
                         ))
                 self.cumulative_misses += 1
                 self._insert(hid, req_idx, timestamp)
+                self.last_accessed[hid] = (req_idx, timestamp, self.cumulative_misses)
 
         evictions = self.total_evictions - evictions_before
         return hit, miss, cold_miss, capacity_miss, evictions
