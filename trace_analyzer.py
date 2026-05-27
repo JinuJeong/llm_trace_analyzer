@@ -69,6 +69,7 @@ def _stats(data: list) -> dict:
 
 
 def analyze(trace, kv_per_token: int = 0) -> dict:
+    total_lens = [r.input_length + r.output_length for r in trace.requests]
     in_lens = [r.input_length for r in trace.requests]
     computed_lens = [r.computed_tokens for r in trace.requests]
     new_computed_lens = [
@@ -81,6 +82,7 @@ def analyze(trace, kv_per_token: int = 0) -> dict:
 
     result = {
         "num_requests": len(trace.requests),
+        "total_length": _stats(total_lens),
         "input_length": _stats(in_lens),
         "computed_tokens": _stats(computed_lens),
         "new_computed": _stats(new_computed_lens),
@@ -141,6 +143,7 @@ def print_model_info(info: dict) -> None:
 
 def print_analysis(result: dict) -> None:
     print(f"Total requests:        {result['num_requests']}")
+    print(f"Avg total length:      {result['total_length']['mean']:.1f}")
     print(f"Avg input length:      {result['input_length']['mean']:.1f}")
     print(f"Avg reused tokens:     {result['computed_tokens']['mean']:.1f}")
     print(f"Avg new computed:      {result['new_computed']['mean']:.1f}")
